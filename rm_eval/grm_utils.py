@@ -277,8 +277,8 @@ def load_model_withhead(model_name, peft_name, tokenizer, device, \
     else:
         model_config['torch_dtype'] = torch.bfloat16
 
-    if 'Mistral' not in model_name:
-        model_config['attn_implementation'] = "flash_attention_2"
+    #if 'Mistral' not in model_name:#Mod
+    #    model_config['attn_implementation'] = "flash_attention_2"
     
     if not len(peft_name):
         model_config.pop('attn_implementation')

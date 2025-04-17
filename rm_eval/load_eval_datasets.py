@@ -65,7 +65,7 @@ def build_unified_eval_dataset(data_path, tokenizer, split='val', size=None):
 
 
 
-def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
+def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None, pair=''):
     if 'HuggingFaceH4/hhh_alignment' in data_path:
         ds_tmp = None
         for i, key in enumerate(['harmless', 'helpful', 'honest', 'other']):
@@ -81,8 +81,11 @@ def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
         ds_raw = load_dataset('lmsys/mt_bench_human_judgments')
         ds = concatenate_datasets([
             ds_raw['human'].add_column('source_id', [0] * len(ds_raw['human'])),
-            ds_raw['gpt4_pair'].add_column('source_id', [1] * len(ds_raw['gpt4_pair'])), 
+            #ds_raw['gpt4_pair'].add_column('source_id', [1] * len(ds_raw['gpt4_pair'])), 
             ])
+        if pair:
+            model1, model2 = pair.split(',')
+            ds = ds.filter(lambda x: (x['model_a']==model1 and x['model_b']==model2) or (x['model_a']==model2 and x['model_b']==model1), num_proc=10)
     else:
         ds = load_dataset(data_path, split=split)
 
@@ -157,8 +160,20 @@ def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
     ds = ds.map(formatting_func, batched=False, num_proc=10)
     remove_columns = []
     for name in ds.column_names:
-        if 'input_ids' not in name and 'attention' not in name and 'source_id' not in name:
+        if 'input_ids' not in name and 'attention' not in name and 'source_id' not in name and 'model_' not in name and 'winner' not in name:
             remove_columns.append(name)
+    #print(ds.select(range(0, 10)))
+    mapping = {
+        'alpaca-13b':0,
+        'claude-v1':1,
+        'gpt-3.5-turbo':2,
+        'gpt-4':3,
+        'vicuna-13b-v1.2':4,
+        'llama-13b':5,
+        }
+    ds = ds.map(lambda example: {"model_a": mapping[example["model_a"]]})
+    ds = ds.map(lambda example: {"model_b": mapping[example["model_b"]]})
+    ds = ds.map(lambda example: {"winner": 1 if example["winner"] == 'model_a' else 0 if example['winner'] == 'model_b' else 0.5})
     ds = ds.remove_columns(remove_columns)
     ds = ds.filter(lambda x: len(x["input_ids"]) <= tokenizer.model_max_length and len(x["input_ids_rejected"]) <= tokenizer.model_max_length, num_proc=10)
     ds.set_format(type="torch")
@@ -167,7 +182,7 @@ def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
 
 
 
-def load_eval_dataset(task, tokenizer, size=None):
+def load_eval_dataset(task, tokenizer, size=None, pair=''):
     # ID eval
     if 'unified' in task or 'Unified' in task:
         data_path = 'llm-blender/Unified-Feedback'
@@ -181,5 +196,5 @@ def load_eval_dataset(task, tokenizer, size=None):
         else:
             raise NotImplementedError
         
-        eval_dataset = build_ood_eval_dataset(data_path, tokenizer, split='test', size=size)
+        eval_dataset = build_ood_eval_dataset(data_path, tokenizer, split='test', size=size, pair=pair)
     return eval_dataset

@@ -1,0 +1,67 @@
+Training dataset size: 1, validation dataset size: 249
+Training dataset size: 1, validation dataset size: 249
+Training dataset size: 1, validation dataset size: 249
+trainable params: 2616703233 || all params: 2616703233 || trainable%: 100.0
+trainable params: 2616703233 || all params: 2616703233 || trainable%: 100.0
+trainable params: 15140865 || all params: 2629482753 || trainable%: 0.5758115349007578
+training start
+trainable params: 15140865 || all params: 2629482753 || trainable%: 0.5758115349007578
+training start
+[2025-03-12 17:08:16,849] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+[2025-03-12 17:08:16,867] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+Warning: The default cache directory for DeepSpeed Triton autotune, /zfsauton2/home/kzaidi/.triton/autotune, appears to be on an NFS system. While this is generally acceptable, if you experience slowdowns or hanging when DeepSpeed exits, it is recommended to set the TRITON_CACHE_DIR environment variable to a non-NFS path.
+Warning: The default cache directory for DeepSpeed Triton autotune, /zfsauton2/home/kzaidi/.triton/autotune, appears to be on an NFS system. While this is generally acceptable, if you experience slowdowns or hanging when DeepSpeed exits, it is recommended to set the TRITON_CACHE_DIR environment variable to a non-NFS path.
+[93m [WARNING] [0m async_io requires the dev libaio .so object and headers but these were not found.
+[93m [WARNING] [0m async_io requires the dev libaio .so object and headers but these were not found.
+[93m [WARNING] [0m async_io: please install the libaio-devel package with yum
+[93m [WARNING] [0m If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+[93m [WARNING] [0m Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+[93m [WARNING] [0m async_io: please install the libaio-devel package with yum
+[93m [WARNING] [0m If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+[93m [WARNING] [0m Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+[93m [WARNING] [0m sparse_attn requires a torch version >= 1.5 and < 2.0 but detected 2.1
+[93m [WARNING] [0m using untested triton version (2.1.0), only 1.0.0 is known to be compatible
+[93m [WARNING] [0m sparse_attn requires a torch version >= 1.5 and < 2.0 but detected 2.1
+[93m [WARNING] [0m using untested triton version (2.1.0), only 1.0.0 is known to be compatible
+trainable params: 2616703233 || all params: 2616703233 || trainable%: 100.0
+trainable params: 15140865 || all params: 2629482753 || trainable%: 0.5758115349007578
+training start
+[2025-03-12 17:08:18,484] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+Warning: The default cache directory for DeepSpeed Triton autotune, /zfsauton2/home/kzaidi/.triton/autotune, appears to be on an NFS system. While this is generally acceptable, if you experience slowdowns or hanging when DeepSpeed exits, it is recommended to set the TRITON_CACHE_DIR environment variable to a non-NFS path.
+[93m [WARNING] [0m async_io requires the dev libaio .so object and headers but these were not found.
+[93m [WARNING] [0m async_io: please install the libaio-devel package with yum
+[93m [WARNING] [0m If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+[93m [WARNING] [0m Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+[93m [WARNING] [0m sparse_attn requires a torch version >= 1.5 and < 2.0 but detected 2.1
+[93m [WARNING] [0m using untested triton version (2.1.0), only 1.0.0 is known to be compatible
+{'train_runtime': 2.0113, 'train_samples_per_second': 0.497, 'train_steps_per_second': 0.497, 'train_loss': 0.03973999619483948, 'epoch': 1.0}
+size of test dataset:  318
+accuracy:  0.7861635220125787
+size of test dataset:  212
+accuracy:  0.6273584905660378
+size of test dataset:  163
+accuracy:  0.852760736196319
+size of test dataset:  232
+accuracy:  0.8663793103448276
+size of test dataset:  248
+accuracy:  0.5806451612903226
+size of test dataset:  361
+accuracy:  0.5734072022160664
+size of test dataset:  212
+accuracy:  0.8254716981132075
+size of test dataset:  163
+accuracy:  0.6993865030674846
+size of test dataset:  217
+accuracy:  0.783410138248848
+size of test dataset:  150
+accuracy:  0.6066666666666667
+size of test dataset:  200
+accuracy:  0.56
+size of test dataset:  279
+accuracy:  0.5376344086021505
+size of test dataset:  272
+accuracy:  0.8492647058823529
+size of test dataset:  175
+accuracy:  0.7885714285714286
+size of test dataset:  153
+accuracy:  0.6339869281045751

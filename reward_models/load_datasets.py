@@ -165,8 +165,68 @@ def build_dataset_SK(data_path, tokenizer, split='train', size=None, model_name=
     ds.set_format(type="torch")
     return ds
 
+#New for MT_Bench
+def build_dataset_MT(data_path, tokenizer, split='train', size=None, mode='', model_name='', pair='', num_human=-1):
+    ds = load_dataset(data_path, split=split)
+        
+    # filter data with the same rating
+    ds = ds.filter(lambda example: example['winner'] != 'tie', num_proc=30)
+    
+    if size is not None:
+        ds = ds.select(range(0, size))
+        
+    if pair:
+        model1, model2 = pair.split(',')
+        ds = ds.filter(lambda x: (x['model_a']==model1 and x['model_b']==model2) or (x['model_a']==model2 and x['model_b']==model1), num_proc=10)
+        
+    # if num_human >= 0:
+    #     ds = ds.select(np.random.randint(0, len(ds), size=num_human))
 
-def load_train_eval_dataset(data_path, tokenizer, size=None, mode='', model_name=''):
+    def formatting_func(example):
+        kwargs = {"padding": True, "truncation": True, "max_length": tokenizer.max_length, "return_tensors": "pt"}
+        # chosen_a = ds.filter(lambda example: example['winner'] == 'model_a', num_proc=30).rename_column("conversation_a", "chosen").rename_column("conversation_b", "rejected")
+        # chosen_b = ds.filter(lambda example: example['winner'] == 'model_b', num_proc=30).rename_column("conversation_b", "chosen").rename_column("conversation_a", "rejected")
+        # chosen_messages = concatenate_datasets([chosen_a['chosen'], chosen_b['chosen']])
+        chosen = 'conversation_a' if example['winner'] == 'model_a' else 'conversation_b'
+        rejected = 'conversation_b' if example['winner'] == 'model_a' else 'conversation_a'
+        chosen_messages = example[chosen]
+        rejected_messages = example[rejected]
+        prompt_plus_chosen_response = tokenizer.apply_chat_template(chosen_messages, tokenize=False)
+        prompt_plus_rejected_response = tokenizer.apply_chat_template(rejected_messages, tokenize=False)
+        tokens_chosen = tokenizer.encode_plus(prompt_plus_chosen_response, **kwargs)
+        tokens_rejected = tokenizer.encode_plus(prompt_plus_rejected_response, **kwargs)
+
+        if 'GRM' in model_name:
+            # add label mask for sft and dpo training
+            prompt = example[chosen][:-1]
+            prompt_template = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
+            tokens_prompt = tokenizer.encode_plus(prompt_template, **kwargs)['input_ids'][0]
+            label_chosen = tokens_chosen["input_ids"][0].clone()
+            label_chosen[:len(tokens_prompt)] = -100
+            label_rejected = tokens_rejected["input_ids"][0].clone()
+            label_rejected[:len(tokens_prompt)] = -100
+            return {
+                "input_ids_chosen": tokens_chosen["input_ids"][0], "attention_mask_chosen": tokens_chosen["attention_mask"][0],
+                "input_ids_rejected": tokens_rejected["input_ids"][0], "attention_mask_rejected": tokens_rejected["attention_mask"][0],
+                "label_chosen": label_chosen,  'label_rejected': label_rejected
+            }
+        else:
+            return {
+                "input_ids_chosen": tokens_chosen["input_ids"][0], "attention_mask_chosen": tokens_chosen["attention_mask"][0],
+                "input_ids_rejected": tokens_rejected["input_ids"][0], "attention_mask_rejected": tokens_rejected["attention_mask"][0],
+            }
+
+    ds = ds.map(formatting_func, batched=False, num_proc=10) 
+    remove_columns = []
+    for col in ds.column_names:
+        if 'input' not in col and 'attention' not in col and 'label' not in col:
+            remove_columns.append(col)
+    ds = ds.remove_columns(remove_columns)
+
+    ds.set_format(type="torch")
+    return ds
+
+def load_train_eval_dataset(data_path, tokenizer, size=None, mode='', model_name='', pair='', num_human=-1):
     if 'Unified' in data_path:
         # mode is only used for loading training data
         train_dataset = build_dataset_UF(data_path, tokenizer, split='train', size=size, mode=mode, model_name=model_name) 
@@ -175,6 +235,14 @@ def load_train_eval_dataset(data_path, tokenizer, size=None, mode='', model_name
         dataset = build_dataset_SK(data_path, tokenizer, split='train', size=size, model_name=model_name)
         dataset_split = dataset.train_test_split(test_size=0.005)
         train_dataset, eval_dataset = dataset_split['train'], dataset_split['test']
+    #New
+    elif 'mt_bench' in data_path:
+        dataset = build_dataset_MT(data_path, tokenizer, split='human', size=size, model_name=model_name, pair=pair, num_human=num_human)
+        #dataset_split = dataset.train_test_split(test_size=0.01)
+        #train_dataset, eval_dataset = dataset_split['train'], dataset_split['test']
+        eval_dataset = dataset
+        train_dataset = dataset.select(np.random.randint(0, len(dataset), size=num_human)) if num_human >= 0 else dataset
+    #End
     else:
         dataset = build_dataset(data_path, tokenizer, split='train', size=size, model_name=model_name) 
         dataset_split = dataset.train_test_split(test_size=0.01)

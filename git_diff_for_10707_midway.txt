@@ -1,0 +1,318 @@
+diff --git a/requirements.txt b/requirements.txt
+index 2a1cfe3..c92fd5f 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -110,7 +110,7 @@ nvidia-cusolver-cu12==11.4.5.107
+ nvidia-cusparse-cu11==11.7.4.91
+ nvidia-cusparse-cu12==12.1.0.106
+ nvidia-nccl-cu11==2.14.3
+-nvidia-nccl-cu12==2.19.3
++nvidia-nccl-cu12==2.18.1
+ nvidia-nvjitlink-cu12==12.5.82
+ nvidia-nvtx-cu11==11.7.91
+ nvidia-nvtx-cu12==12.1.105
+@@ -193,7 +193,7 @@ toolz==0.12.1
+ torch==2.1.0
+ tqdm==4.65.0
+ transformers==4.43.4
+-triton==2.2.0
++triton==2.1.0
+ trl==0.8.5
+ typer==0.9.0
+ typing-inspect==0.9.0
+diff --git a/reward_models/load_datasets.py b/reward_models/load_datasets.py
+index 5375ef3..7038a1d 100644
+--- a/reward_models/load_datasets.py
++++ b/reward_models/load_datasets.py
+@@ -165,8 +165,68 @@ def build_dataset_SK(data_path, tokenizer, split='train', size=None, model_name=
+     ds.set_format(type="torch")
+     return ds
+ 
++#New for MT_Bench
++def build_dataset_MT(data_path, tokenizer, split='train', size=None, mode='', model_name='', pair='', num_human=-1):
++    ds = load_dataset(data_path, split=split)
++        
++    # filter data with the same rating
++    ds = ds.filter(lambda example: example['winner'] != 'tie', num_proc=30)
++    
++    if size is not None:
++        ds = ds.select(range(0, size))
++        
++    if pair:
++        model1, model2 = pair.split(',')
++        ds = ds.filter(lambda x: (x['model_a']==model1 and x['model_b']==model2) or (x['model_a']==model2 and x['model_b']==model1), num_proc=10)
++        
++    # if num_human >= 0:
++    #     ds = ds.select(np.random.randint(0, len(ds), size=num_human))
++
++    def formatting_func(example):
++        kwargs = {"padding": True, "truncation": True, "max_length": tokenizer.max_length, "return_tensors": "pt"}
++        # chosen_a = ds.filter(lambda example: example['winner'] == 'model_a', num_proc=30).rename_column("conversation_a", "chosen").rename_column("conversation_b", "rejected")
++        # chosen_b = ds.filter(lambda example: example['winner'] == 'model_b', num_proc=30).rename_column("conversation_b", "chosen").rename_column("conversation_a", "rejected")
++        # chosen_messages = concatenate_datasets([chosen_a['chosen'], chosen_b['chosen']])
++        chosen = 'conversation_a' if example['winner'] == 'model_a' else 'conversation_b'
++        rejected = 'conversation_b' if example['winner'] == 'model_a' else 'conversation_a'
++        chosen_messages = example[chosen]
++        rejected_messages = example[rejected]
++        prompt_plus_chosen_response = tokenizer.apply_chat_template(chosen_messages, tokenize=False)
++        prompt_plus_rejected_response = tokenizer.apply_chat_template(rejected_messages, tokenize=False)
++        tokens_chosen = tokenizer.encode_plus(prompt_plus_chosen_response, **kwargs)
++        tokens_rejected = tokenizer.encode_plus(prompt_plus_rejected_response, **kwargs)
++
++        if 'GRM' in model_name:
++            # add label mask for sft and dpo training
++            prompt = example[chosen][:-1]
++            prompt_template = tokenizer.apply_chat_template(prompt, tokenize=False, add_generation_prompt=True)
++            tokens_prompt = tokenizer.encode_plus(prompt_template, **kwargs)['input_ids'][0]
++            label_chosen = tokens_chosen["input_ids"][0].clone()
++            label_chosen[:len(tokens_prompt)] = -100
++            label_rejected = tokens_rejected["input_ids"][0].clone()
++            label_rejected[:len(tokens_prompt)] = -100
++            return {
++                "input_ids_chosen": tokens_chosen["input_ids"][0], "attention_mask_chosen": tokens_chosen["attention_mask"][0],
++                "input_ids_rejected": tokens_rejected["input_ids"][0], "attention_mask_rejected": tokens_rejected["attention_mask"][0],
++                "label_chosen": label_chosen,  'label_rejected': label_rejected
++            }
++        else:
++            return {
++                "input_ids_chosen": tokens_chosen["input_ids"][0], "attention_mask_chosen": tokens_chosen["attention_mask"][0],
++                "input_ids_rejected": tokens_rejected["input_ids"][0], "attention_mask_rejected": tokens_rejected["attention_mask"][0],
++            }
++
++    ds = ds.map(formatting_func, batched=False, num_proc=10) 
++    remove_columns = []
++    for col in ds.column_names:
++        if 'input' not in col and 'attention' not in col and 'label' not in col:
++            remove_columns.append(col)
++    ds = ds.remove_columns(remove_columns)
++
++    ds.set_format(type="torch")
++    return ds
+ 
+-def load_train_eval_dataset(data_path, tokenizer, size=None, mode='', model_name=''):
++def load_train_eval_dataset(data_path, tokenizer, size=None, mode='', model_name='', pair='', num_human=-1):
+     if 'Unified' in data_path:
+         # mode is only used for loading training data
+         train_dataset = build_dataset_UF(data_path, tokenizer, split='train', size=size, mode=mode, model_name=model_name) 
+@@ -175,8 +235,16 @@ def load_train_eval_dataset(data_path, tokenizer, size=None, mode='', model_name
+         dataset = build_dataset_SK(data_path, tokenizer, split='train', size=size, model_name=model_name)
+         dataset_split = dataset.train_test_split(test_size=0.005)
+         train_dataset, eval_dataset = dataset_split['train'], dataset_split['test']
++    #New
++    elif 'mt_bench' in data_path:
++        dataset = build_dataset_MT(data_path, tokenizer, split='human', size=size, model_name=model_name, pair=pair, num_human=num_human)
++        #dataset_split = dataset.train_test_split(test_size=0.01)
++        #train_dataset, eval_dataset = dataset_split['train'], dataset_split['test']
++        eval_dataset = dataset
++        train_dataset = dataset.select(np.random.randint(0, len(dataset), size=num_human)) if num_human >= 0 else dataset
++    #End
+     else:
+         dataset = build_dataset(data_path, tokenizer, split='train', size=size, model_name=model_name) 
+         dataset_split = dataset.train_test_split(test_size=0.01)
+         train_dataset, eval_dataset = dataset_split['train'], dataset_split['test']
+-    return train_dataset, eval_dataset
+\ No newline at end of file
++    return train_dataset, eval_dataset
+diff --git a/reward_models/run_grm_reward_train.py b/reward_models/run_grm_reward_train.py
+index 4d001c8..4ab494c 100644
+--- a/reward_models/run_grm_reward_train.py
++++ b/reward_models/run_grm_reward_train.py
+@@ -65,6 +65,8 @@ class ScriptArguments:
+     sft_only: Optional[bool] = field(default=True)
+     no_logsigmoid_sft: Optional[bool] = field(default=False)
+     
++    pair: Optional[str] = field(default='') # mlp, linear
++    num_human: Optional[int] = field(default=-1)
+ 
+     
+ 
+@@ -115,7 +117,7 @@ if tokenizer.pad_token == None:
+         tokenizer.pad_token = tokenizer.eos_token
+ 
+ # Load datasets
+-train_dataset, eval_dataset = load_train_eval_dataset(script_args.dataset, tokenizer, mode=script_args.dataset_mode, model_name='GRM', size=100 if script_args.debug else None)
++train_dataset, eval_dataset = load_train_eval_dataset(script_args.dataset, tokenizer, mode=script_args.dataset_mode, model_name='GRM', size=100 if script_args.debug else None, pair=script_args.pair, num_human=script_args.num_human)
+ print('Training dataset size: {}, validation dataset size: {}'.format(len(train_dataset), len(eval_dataset)))
+ 
+ 
+diff --git a/reward_models/utils.py b/reward_models/utils.py
+index e4c3a7d..36b6bfe 100644
+--- a/reward_models/utils.py
++++ b/reward_models/utils.py
+@@ -5,7 +5,7 @@ import os
+ from collections import OrderedDict
+ import torch
+ import torch.nn as nn
+-accuracy = evaluate.load('accuracy')
++accuracy = evaluate.load('evaluate/metrics/accuracy/accuracy.py')#Just accuracy
+ 
+ 
+ def is_lora_model(model):
+diff --git a/rm_eval/eval_grm.py b/rm_eval/eval_grm.py
+index 957c358..efa19b9 100644
+--- a/rm_eval/eval_grm.py
++++ b/rm_eval/eval_grm.py
+@@ -27,6 +27,8 @@ class ScriptArguments:
+     log_dir: Optional[str] = field(default='./eval_reward_grm')
+     task: Optional[Literal['unified', 'hhh', 'mtbench']] = field(default='unified')
+     save_all_data: Optional[bool] = field(default=False)
++    pair: Optional[str] = field(default='')
++    affix: Optional[str] = field(default='')
+ 
+ 
+ parser = HfArgumentParser(ScriptArguments)
+@@ -36,7 +38,7 @@ accelerator = Accelerator()
+ device = Accelerator().local_process_index 
+ 
+ model_name = script_args.base_model
+-log_path = os.path.join(script_args.log_dir, model_name.split('/')[-1], script_args.task)
++log_path = os.path.join(script_args.log_dir, model_name.split('/')[-1], script_args.task, script_args.pair, script_args.affix)
+ if accelerator.is_main_process and not os.path.exists(log_path):
+     os.makedirs(log_path)
+ 
+@@ -55,7 +57,7 @@ model = load_model_withhead(model_name, script_args.peft_name, tokenizer, device
+ 
+ 
+ # load dataset
+-eval_dataset = load_eval_dataset(script_args.task, tokenizer)
++eval_dataset = load_eval_dataset(script_args.task, tokenizer, pair=script_args.pair)
+ print('size of test dataset: ', len(eval_dataset))
+ 
+ #### inference
+@@ -68,6 +70,9 @@ full_rejected_prompts = []
+ full_rewards_chosen = []
+ full_rewards_rejected = []
+ full_source_ids = []
++full_model_a = []
++full_model_b = []
++full_winner = []
+ pbar = tqdm(total=len(eval_dataset) // script_args.per_device_eval_batch_size // accelerator.num_processes)
+ with torch.no_grad():
+     for i, batch in enumerate(eval_data_loader):
+@@ -79,6 +84,9 @@ with torch.no_grad():
+         full_rejected_prompts.extend(batch['input_ids_rejected'])
+         if 'source_id' in batch.keys():
+             full_source_ids.extend(batch['source_id'])
++        full_model_a.extend(batch['model_a'])
++        full_model_b.extend(batch['model_b'])
++        full_winner.extend(batch['winner'])
+         pbar.update(1)
+ 
+ full_chosen_prompts = tokenizer.batch_decode(full_chosen_prompts, skip_special_tokens = True)
+@@ -89,6 +97,9 @@ full_rewards_chosen = [x.item() for x in full_rewards_chosen]
+ full_rewards_rejected = [x.item() for x in full_rewards_rejected]
+ if 'source_id' in batch.keys():
+     full_source_ids = [x.item() for x in full_source_ids]
++full_model_a = [x.item() for x in full_model_a]
++full_model_b = [x.item() for x in full_model_b]
++full_winner = [x.item() for x in full_winner]
+ 
+ accelerator.wait_for_everyone()
+ all_chosen_prompts = accelerator.gather_for_metrics(full_chosen_prompts)
+@@ -97,6 +108,9 @@ all_rewards_chosen = accelerator.gather_for_metrics(full_rewards_chosen)
+ all_rewards_rejected = accelerator.gather_for_metrics(full_rewards_rejected)
+ if 'source_id' in batch.keys():
+     all_source_ids = accelerator.gather_for_metrics(full_source_ids)
++all_model_a = accelerator.gather_for_metrics(full_model_a)
++all_model_b = accelerator.gather_for_metrics(full_model_b)
++all_winner = accelerator.gather_for_metrics(full_winner)
+ 
+ 
+ if accelerator.is_main_process:
+@@ -109,6 +123,9 @@ if accelerator.is_main_process:
+     }
+     if 'source_id' in batch.keys():
+         evaluation_result['source_ids'] = all_source_ids
++    evaluation_result['model_a'] = all_model_a
++    evaluation_result['model_b'] = all_model_b
++    evaluation_result['winner'] = all_winner
+     dataframe = pd.DataFrame(evaluation_result)
+     accuracy = (dataframe['chosen_rewards'] > dataframe['rejected_rewards']).mean()
+     print('accuracy: ', accuracy)
+diff --git a/rm_eval/grm_utils.py b/rm_eval/grm_utils.py
+index 94dfed4..3c87d7d 100644
+--- a/rm_eval/grm_utils.py
++++ b/rm_eval/grm_utils.py
+@@ -277,8 +277,8 @@ def load_model_withhead(model_name, peft_name, tokenizer, device, \
+     else:
+         model_config['torch_dtype'] = torch.bfloat16
+ 
+-    if 'Mistral' not in model_name:
+-        model_config['attn_implementation'] = "flash_attention_2"
++    #if 'Mistral' not in model_name:#Mod
++    #    model_config['attn_implementation'] = "flash_attention_2"
+     
+     if not len(peft_name):
+         model_config.pop('attn_implementation')
+@@ -333,4 +333,4 @@ def model_withhead_forward(model, input_ids, attention_mask, device, forward_typ
+         return (per_token_logps * loss_mask).sum(-1)
+     else:
+         raise NotImplementedError
+-    return reward_tensors
+\ No newline at end of file
++    return reward_tensors
+diff --git a/rm_eval/load_eval_datasets.py b/rm_eval/load_eval_datasets.py
+index 0219ae6..81abdb4 100644
+--- a/rm_eval/load_eval_datasets.py
++++ b/rm_eval/load_eval_datasets.py
+@@ -65,7 +65,7 @@ def build_unified_eval_dataset(data_path, tokenizer, split='val', size=None):
+ 
+ 
+ 
+-def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
++def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None, pair=''):
+     if 'HuggingFaceH4/hhh_alignment' in data_path:
+         ds_tmp = None
+         for i, key in enumerate(['harmless', 'helpful', 'honest', 'other']):
+@@ -81,8 +81,11 @@ def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
+         ds_raw = load_dataset('lmsys/mt_bench_human_judgments')
+         ds = concatenate_datasets([
+             ds_raw['human'].add_column('source_id', [0] * len(ds_raw['human'])),
+-            ds_raw['gpt4_pair'].add_column('source_id', [1] * len(ds_raw['gpt4_pair'])), 
++            #ds_raw['gpt4_pair'].add_column('source_id', [1] * len(ds_raw['gpt4_pair'])), 
+             ])
++        if pair:
++            model1, model2 = pair.split(',')
++            ds = ds.filter(lambda x: (x['model_a']==model1 and x['model_b']==model2) or (x['model_a']==model2 and x['model_b']==model1), num_proc=10)
+     else:
+         ds = load_dataset(data_path, split=split)
+ 
+@@ -157,8 +160,20 @@ def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
+     ds = ds.map(formatting_func, batched=False, num_proc=10)
+     remove_columns = []
+     for name in ds.column_names:
+-        if 'input_ids' not in name and 'attention' not in name and 'source_id' not in name:
++        if 'input_ids' not in name and 'attention' not in name and 'source_id' not in name and 'model_' not in name and 'winner' not in name:
+             remove_columns.append(name)
++    #print(ds.select(range(0, 10)))
++    mapping = {
++        'alpaca-13b':0,
++        'claude-v1':1,
++        'gpt-3.5-turbo':2,
++        'gpt-4':3,
++        'vicuna-13b-v1.2':4,
++        'llama-13b':5,
++        }
++    ds = ds.map(lambda example: {"model_a": mapping[example["model_a"]]})
++    ds = ds.map(lambda example: {"model_b": mapping[example["model_b"]]})
++    ds = ds.map(lambda example: {"winner": 1 if example["winner"] == 'model_a' else 0 if example['winner'] == 'model_b' else 0.5})
+     ds = ds.remove_columns(remove_columns)
+     ds = ds.filter(lambda x: len(x["input_ids"]) <= tokenizer.model_max_length and len(x["input_ids_rejected"]) <= tokenizer.model_max_length, num_proc=10)
+     ds.set_format(type="torch")
+@@ -167,7 +182,7 @@ def build_ood_eval_dataset(data_path, tokenizer, split='test', size=None):
+ 
+ 
+ 
+-def load_eval_dataset(task, tokenizer, size=None):
++def load_eval_dataset(task, tokenizer, size=None, pair=''):
+     # ID eval
+     if 'unified' in task or 'Unified' in task:
+         data_path = 'llm-blender/Unified-Feedback'
+@@ -181,5 +196,5 @@ def load_eval_dataset(task, tokenizer, size=None):
+         else:
+             raise NotImplementedError
+         
+-        eval_dataset = build_ood_eval_dataset(data_path, tokenizer, split='test', size=size)
++        eval_dataset = build_ood_eval_dataset(data_path, tokenizer, split='test', size=size, pair=pair)
+     return eval_dataset
+\ No newline at end of file

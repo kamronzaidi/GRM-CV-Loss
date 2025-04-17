@@ -65,6 +65,8 @@ class ScriptArguments:
     sft_only: Optional[bool] = field(default=True)
     no_logsigmoid_sft: Optional[bool] = field(default=False)
     
+    pair: Optional[str] = field(default='') # mlp, linear
+    num_human: Optional[int] = field(default=-1)
 
     
 
@@ -115,7 +117,7 @@ if tokenizer.pad_token == None:
         tokenizer.pad_token = tokenizer.eos_token
 
 # Load datasets
-train_dataset, eval_dataset = load_train_eval_dataset(script_args.dataset, tokenizer, mode=script_args.dataset_mode, model_name='GRM', size=100 if script_args.debug else None)
+train_dataset, eval_dataset = load_train_eval_dataset(script_args.dataset, tokenizer, mode=script_args.dataset_mode, model_name='GRM', size=100 if script_args.debug else None, pair=script_args.pair, num_human=script_args.num_human)
 print('Training dataset size: {}, validation dataset size: {}'.format(len(train_dataset), len(eval_dataset)))
 
 

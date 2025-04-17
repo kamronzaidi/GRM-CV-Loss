@@ -5,7 +5,7 @@ import os
 from collections import OrderedDict
 import torch
 import torch.nn as nn
-accuracy = evaluate.load('accuracy')
+accuracy = evaluate.load('evaluate/metrics/accuracy/accuracy.py')#Just accuracy
 
 
 def is_lora_model(model):

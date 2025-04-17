@@ -27,6 +27,8 @@ class ScriptArguments:
     log_dir: Optional[str] = field(default='./eval_reward_grm')
     task: Optional[Literal['unified', 'hhh', 'mtbench']] = field(default='unified')
     save_all_data: Optional[bool] = field(default=False)
+    pair: Optional[str] = field(default='')
+    affix: Optional[str] = field(default='')
 
 
 parser = HfArgumentParser(ScriptArguments)
@@ -36,7 +38,7 @@ accelerator = Accelerator()
 device = Accelerator().local_process_index 
 
 model_name = script_args.base_model
-log_path = os.path.join(script_args.log_dir, model_name.split('/')[-1], script_args.task)
+log_path = os.path.join(script_args.log_dir, model_name.split('/')[-1], script_args.task, script_args.pair, script_args.affix)
 if accelerator.is_main_process and not os.path.exists(log_path):
     os.makedirs(log_path)
 
@@ -55,7 +57,7 @@ model = load_model_withhead(model_name, script_args.peft_name, tokenizer, device
 
 
 # load dataset
-eval_dataset = load_eval_dataset(script_args.task, tokenizer)
+eval_dataset = load_eval_dataset(script_args.task, tokenizer, pair=script_args.pair)
 print('size of test dataset: ', len(eval_dataset))
 
 #### inference
@@ -68,6 +70,9 @@ full_rejected_prompts = []
 full_rewards_chosen = []
 full_rewards_rejected = []
 full_source_ids = []
+full_model_a = []
+full_model_b = []
+full_winner = []
 pbar = tqdm(total=len(eval_dataset) // script_args.per_device_eval_batch_size // accelerator.num_processes)
 with torch.no_grad():
     for i, batch in enumerate(eval_data_loader):
@@ -79,6 +84,9 @@ with torch.no_grad():
         full_rejected_prompts.extend(batch['input_ids_rejected'])
         if 'source_id' in batch.keys():
             full_source_ids.extend(batch['source_id'])
+        full_model_a.extend(batch['model_a'])
+        full_model_b.extend(batch['model_b'])
+        full_winner.extend(batch['winner'])
         pbar.update(1)
 
 full_chosen_prompts = tokenizer.batch_decode(full_chosen_prompts, skip_special_tokens = True)
@@ -89,6 +97,9 @@ full_rewards_chosen = [x.item() for x in full_rewards_chosen]
 full_rewards_rejected = [x.item() for x in full_rewards_rejected]
 if 'source_id' in batch.keys():
     full_source_ids = [x.item() for x in full_source_ids]
+full_model_a = [x.item() for x in full_model_a]
+full_model_b = [x.item() for x in full_model_b]
+full_winner = [x.item() for x in full_winner]
 
 accelerator.wait_for_everyone()
 all_chosen_prompts = accelerator.gather_for_metrics(full_chosen_prompts)
@@ -97,6 +108,9 @@ all_rewards_chosen = accelerator.gather_for_metrics(full_rewards_chosen)
 all_rewards_rejected = accelerator.gather_for_metrics(full_rewards_rejected)
 if 'source_id' in batch.keys():
     all_source_ids = accelerator.gather_for_metrics(full_source_ids)
+all_model_a = accelerator.gather_for_metrics(full_model_a)
+all_model_b = accelerator.gather_for_metrics(full_model_b)
+all_winner = accelerator.gather_for_metrics(full_winner)
 
 
 if accelerator.is_main_process:
@@ -109,6 +123,9 @@ if accelerator.is_main_process:
     }
     if 'source_id' in batch.keys():
         evaluation_result['source_ids'] = all_source_ids
+    evaluation_result['model_a'] = all_model_a
+    evaluation_result['model_b'] = all_model_b
+    evaluation_result['winner'] = all_winner
     dataframe = pd.DataFrame(evaluation_result)
     accuracy = (dataframe['chosen_rewards'] > dataframe['rejected_rewards']).mean()
     print('accuracy: ', accuracy)
